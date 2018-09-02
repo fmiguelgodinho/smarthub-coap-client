@@ -26,8 +26,8 @@
 			</activation>
 			<repositories>
 				<repository>
-				    <id>jitpack.io</id>
-				    <url>https://jitpack.io</url>
+					<id>jitpack.io</id>
+					<url>https://jitpack.io</url>
 				</repository>
 			</repositories>
 		</profile>
@@ -35,10 +35,15 @@
 
 	<dependencies>
 		<dependency>
-		    <groupId>com.mbed.java-coap</groupId>
-		    <artifactId>coap-core</artifactId>
-		    <version>5.0.0</version>
+			<groupId>com.mbed.java-coap</groupId>
+			<artifactId>coap-core</artifactId>
+			<version>5.0.0</version>
 		</dependency>
-				
+
+		<dependency>
+			<groupId>org.bouncycastle</groupId>
+			<artifactId>bcprov-jdk15on</artifactId>
+			<version>1.59</version>
+		</dependency>
 	</dependencies>
 </project>

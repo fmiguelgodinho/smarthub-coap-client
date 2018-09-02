@@ -1,3 +1,5 @@
+import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
@@ -7,6 +9,7 @@ import java.net.InetSocketAddress;
 import java.net.URL;
 import java.security.KeyStore;
 import java.security.SecureRandom;
+import java.security.Security;
 import java.util.Queue;
 import java.util.Random;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -20,6 +23,8 @@ import javax.net.ssl.SSLSession;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
+
 import com.mbed.coap.client.CoapClient;
 import com.mbed.coap.client.CoapClientBuilder;
 import com.mbed.coap.packet.CoapPacket;
@@ -27,29 +32,28 @@ import com.mbed.coap.packet.MediaTypes;
 
 public class SHClient {
 
+	public static final String PROTOCOL = "http"; // 'coap' or 'http'
 	public static final int NUMBER_OF_OPS = 10;
 	public static final double PERCENTAGE_OF_READ_OPS = 0.6;
-	public static final int NUMBER_OF_CLIENTS = 10;
-	public static final String PROTOCOL = "coap"; // 'coap' or 'http'
+	public static final int NUMBER_OF_CLIENTS = 75;
 
 	public static final String SH_DOMAIN = "localhost";
 	public static final int SH_COAP_PORT = 5683;
 	public static final int SH_HTTP_PORT = 8080;
-	
+
 	public static final String HTTP_KEYSTORE_FILEPATH = "clientkeystore.p12";
 	public static final String HTTP_TRUSTSTORE_FILEPATH = "clienttruststore.p12";
 	public static final String HTTP_KEYSTORE_FORMAT = "PKCS12";
 	public static final String HTTP_TRUSTSTORE_FORMAT = "PKCS12";
 	public static final String HTTP_KEYSTORE_PW = "sparkmeup";
 	public static final String HTTP_TRUSTSTORE_PW = "sparkmeup";
-	public static final String HTTP_CERT_FORMAT = "X509";
+	public static final String HTTP_CERT_FORMAT = "SunX509";
 	public static final String HTTP_TLS_VERSION = "TLSv1.2";
 
-
-	private static Thread[] clientThreads = new Thread[NUMBER_OF_CLIENTS];
-	private static Queue<Long> timeQueue = new ConcurrentLinkedQueue<Long>();
-
 	public static void main(String[] args) throws Exception {
+
+		Thread[] clientThreads = new Thread[NUMBER_OF_CLIENTS];
+		Queue<Long> timeQueue = new ConcurrentLinkedQueue<Long>();
 
 		for (int i = 0; i < NUMBER_OF_CLIENTS; i++) {
 
@@ -102,6 +106,8 @@ public class SHClient {
 							client.close();
 						} else if (PROTOCOL.equals("http")) {
 
+							Security.addProvider(new BouncyCastleProvider());
+
 							File keystoreFile = new File(HTTP_KEYSTORE_FILEPATH);
 							File truststoreFile = new File(HTTP_TRUSTSTORE_FILEPATH);
 
@@ -112,7 +118,6 @@ public class SHClient {
 							KeyManagerFactory kmf = KeyManagerFactory.getInstance(HTTP_CERT_FORMAT);
 							kmf.init(keyStore, HTTP_KEYSTORE_PW.toCharArray());
 							KeyManager[] keyManagers = kmf.getKeyManagers();
-
 
 							// load truststore
 							is = new FileInputStream(truststoreFile);
@@ -126,9 +131,10 @@ public class SHClient {
 							SSLContext sslContext = SSLContext.getInstance(HTTP_TLS_VERSION);
 							sslContext.init(keyManagers, trustManagers, new SecureRandom());
 
-							String smartHubUrl = "https://" + SH_DOMAIN + ":" + SH_HTTP_PORT + "/api/contract/xcc";
+							String smartHubUrl = "https://" + SH_DOMAIN + ":" + SH_HTTP_PORT
+									+ "/api/mainchannel/contract/xcc";
 							String requestMethod = "POST";
-							String requestParameters = "[\""+ r.nextInt(10000) + "\",\"abc\"]";
+							String requestParameters = "operationId=put&operationArgs=[\"" + r.nextInt(10000) + "\",\"abc\"]";
 							// write ops
 							for (int j = 0; j < NUMBER_OF_OPS - (PERCENTAGE_OF_READ_OPS * NUMBER_OF_OPS); j++) {
 
@@ -139,8 +145,7 @@ public class SHClient {
 								timeQueue.add(deltaT);
 							}
 
-							requestMethod = "GET";
-							requestParameters = null;
+							requestParameters = "operationId=queryAll";
 							// read ops
 							for (int k = 0; k < PERCENTAGE_OF_READ_OPS * NUMBER_OF_OPS; k++) {
 
@@ -178,10 +183,11 @@ public class SHClient {
 				+ " per client. Average time per client: " + avgTMillis);
 
 	}
-	
-	private static void makeHTTPRequest(String smartHubUrl, SSLContext sslContext, String requestMethod, String requestParameters) {
+
+	private static void makeHTTPRequest(String smartHubUrl, SSLContext sslContext, String requestMethod,
+			String requestParameters) {
 		// perform URL request to API
-		String responseContentType = null;
+		String responseContentType = null, responseBody = null;
 		int responseCode = -1;
 		HttpURLConnection urlConnection = null;
 
@@ -197,30 +203,43 @@ public class SHClient {
 						return true;
 					}
 				});
-				((HttpsURLConnection) urlConnection)
-						.setSSLSocketFactory(sslContext.getSocketFactory());
+				((HttpsURLConnection) urlConnection).setSSLSocketFactory(sslContext.getSocketFactory());
 			}
+
+			urlConnection.setDoOutput(true);
+			urlConnection.setUseCaches(false);
 
 			// setup request
 			urlConnection.setRequestMethod(requestMethod);
 			urlConnection.setRequestProperty("Accept", "application/json");
-			urlConnection.setConnectTimeout(5000);
-			urlConnection.setReadTimeout(15000);
+			urlConnection.setConnectTimeout(500000);
+			urlConnection.setReadTimeout(150000);
 
 			// body parameters
-			if (requestParameters != null && !requestParameters.isEmpty()
-					&& requestMethod.equals("POST")) {
+			if (requestParameters != null && !requestParameters.isEmpty() && requestMethod.equals("POST")) {
 				byte[] requestParametersBytes = requestParameters.getBytes("UTF-8");
 				OutputStream os = urlConnection.getOutputStream();
 				os.write(requestParametersBytes);
 				os.close();
 			}
+			urlConnection.connect();
 
+			System.out.println(requestMethod + " " + smartHubUrl + " " + requestParameters);
 			responseCode = urlConnection.getResponseCode();
 			responseContentType = urlConnection.getContentType();
-			System.out
-					.println("Rsp: HTTP " + responseCode + " Content-Type: " + responseContentType);
+			
+			BufferedInputStream bis = new BufferedInputStream(urlConnection.getInputStream());
+			ByteArrayOutputStream buf = new ByteArrayOutputStream();
+			int result2 = bis.read();
+			while (result2 != -1) {
+				buf.write((byte) result2);
+				result2 = bis.read();
+			}
+			responseBody = buf.toString();
+			System.out.println(
+					"Rsp: HTTP " + responseCode + " Content-Type: " + responseContentType + " Content:" + responseBody);
 		} catch (Exception e) {
+			e.printStackTrace();
 		} finally {
 			if (urlConnection != null) {
 				urlConnection.disconnect();
